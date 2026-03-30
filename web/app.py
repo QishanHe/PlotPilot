@@ -13,12 +13,11 @@ from ..load_env import load_env
 
 load_env()
 
-# 配置日志
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    datefmt="%H:%M:%S",
-)
+from .middleware.error_handler import add_error_handlers
+from .middleware.logging_config import setup_logging
+from .repositories.stats_repository import StatsRepository
+from .services.stats_service import StatsService
+from .routers.stats import create_stats_router
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -73,6 +72,21 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# 设置日志
+setup_logging(level=logging.INFO)
+
+# 添加错误处理
+add_error_handlers(app)
+
+# 初始化统计模块
+books_root = Path(__file__).parent.parent.parent / "output" / "novels"
+stats_repo = StatsRepository(books_root)
+stats_service = StatsService(stats_repo)
+stats_router = create_stats_router(stats_service)
+
+# 注册统计路由
+app.include_router(stats_router, prefix="/api/stats", tags=["statistics"])
 
 # 请求日志中间件
 @app.middleware("http")
