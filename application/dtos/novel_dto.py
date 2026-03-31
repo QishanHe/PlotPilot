@@ -1,7 +1,11 @@
 """Novel 数据传输对象"""
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from domain.novel.entities.novel import Novel
+    from domain.novel.entities.chapter import Chapter
 
 
 @dataclass
@@ -12,6 +16,24 @@ class ChapterDTO:
     title: str
     content: str
     word_count: int
+
+    @classmethod
+    def from_domain(cls, chapter: 'Chapter') -> 'ChapterDTO':
+        """从领域对象创建 DTO
+
+        Args:
+            chapter: Chapter 领域对象
+
+        Returns:
+            ChapterDTO
+        """
+        return cls(
+            id=chapter.id,
+            number=chapter.number,
+            title=chapter.title,
+            content=chapter.content,
+            word_count=chapter.word_count.value
+        )
 
 
 @dataclass
@@ -29,7 +51,7 @@ class NovelDTO:
     total_word_count: int
 
     @classmethod
-    def from_domain(cls, novel) -> 'NovelDTO':
+    def from_domain(cls, novel: 'Novel') -> 'NovelDTO':
         """从领域对象创建 DTO
 
         Args:
@@ -38,18 +60,7 @@ class NovelDTO:
         Returns:
             NovelDTO
         """
-        from domain.novel.entities.novel import Novel
-
-        chapters = [
-            ChapterDTO(
-                id=chapter.id,
-                number=chapter.number,
-                title=chapter.title,
-                content=chapter.content,
-                word_count=chapter.word_count.value
-            )
-            for chapter in novel.chapters
-        ]
+        chapters = [ChapterDTO.from_domain(chapter) for chapter in novel.chapters]
 
         return cls(
             id=novel.novel_id.value,
