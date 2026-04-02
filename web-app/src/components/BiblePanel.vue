@@ -40,9 +40,6 @@
         </div>
       </div>
       <n-space class="bible-hero-actions" :size="8" align="center">
-        <n-button size="small" quaternary @click="showJson = !showJson">
-          {{ showJson ? '返回表单' : '高级 · JSON' }}
-        </n-button>
         <n-button size="small" secondary :loading="generating" @click="generateBible" title="用 AI 根据小说标题重新生成设定">
           ✦ AI 生成
         </n-button>
@@ -50,15 +47,10 @@
       </n-space>
     </header>
 
-    <n-scrollbar class="bible-scroll">
-      <div v-if="showJson" class="bible-json-wrap">
-        <n-alert type="default" class="bible-json-alert" :bordered="false">
-          直接编辑 <code>bible.json</code> 等价结构；保存会覆盖下方表单。须可被后端 Bible 模型解析。
-        </n-alert>
-        <n-input v-model:value="jsonRaw" type="textarea" class="bible-json" placeholder="{ ... }" />
-      </div>
-
-      <div v-else class="bible-form">
+    <n-tabs v-model:value="viewMode" type="line" size="medium" animated class="bible-tabs">
+      <n-tab-pane name="editor" tab="可视化编辑">
+        <n-scrollbar class="bible-scroll">
+          <div class="bible-form">
         <n-card size="small" class="bible-card" :bordered="false" :segmented="{ content: true, footer: false }">
           <template #header>
             <div class="bcard-head">
@@ -190,6 +182,19 @@
         </n-card>
       </div>
     </n-scrollbar>
+  </n-tab-pane>
+
+  <n-tab-pane name="json" tab="JSON">
+    <n-scrollbar class="bible-scroll">
+      <div class="bible-json-wrap">
+        <n-alert type="default" class="bible-json-alert" :bordered="false">
+          直接编辑 <code>bible.json</code> 等价结构；保存会覆盖表单。须可被后端 Bible 模型解析。
+        </n-alert>
+        <n-input v-model:value="jsonRaw" type="textarea" class="bible-json" placeholder="{ ... }" />
+      </div>
+    </n-scrollbar>
+  </n-tab-pane>
+</n-tabs>
   </div>
 </template>
 
@@ -224,7 +229,7 @@ const emptyState = () => ({
 
 const state = ref(emptyState())
 const jsonRaw = ref('')
-const showJson = ref(false)
+const viewMode = ref<'editor' | 'json'>('editor')
 const saving = ref(false)
 const generating = ref(false)
 
@@ -346,7 +351,7 @@ const save = async () => {
   saving.value = true
   try {
     let payload: Record<string, unknown>
-    if (showJson.value) {
+    if (viewMode.value === 'json') {
       payload = JSON.parse(jsonRaw.value)
     } else {
       payload = {
@@ -359,7 +364,7 @@ const save = async () => {
     const apiData = toApiFormat(payload)
     await bibleApi.updateBible(props.slug, apiData)
     message.success('设定已保存')
-    if (showJson.value) {
+    if (viewMode.value === 'json') {
       await load()
     } else {
       syncJsonFromState()
@@ -401,8 +406,8 @@ const removeLoc = (i: number) => {
   state.value.locations.splice(i, 1)
 }
 
-watch(showJson, v => {
-  if (v) syncJsonFromState()
+watch(viewMode, v => {
+  if (v === 'json') syncJsonFromState()
 })
 
 watch(
