@@ -391,3 +391,34 @@ CREATE TABLE IF NOT EXISTS narrative_events (
 
 CREATE INDEX IF NOT EXISTS idx_narrative_events_novel_chapter
     ON narrative_events(novel_id, chapter_number);
+
+-- ========== 文风金库（Voice Vault）==========
+-- voice_vault：AI 原文与作者改稿样本对
+CREATE TABLE IF NOT EXISTS voice_vault (
+    sample_id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL,
+    chapter_number INTEGER NOT NULL,
+    scene_type TEXT,
+    ai_original TEXT NOT NULL,
+    author_refined TEXT NOT NULL,
+    diff_analysis TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_vault_novel ON voice_vault(novel_id, chapter_number);
+
+-- voice_fingerprint：文风指纹（统计特征）
+CREATE TABLE IF NOT EXISTS voice_fingerprint (
+    fingerprint_id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL,
+    pov_character_id TEXT,
+    adjective_density REAL,
+    avg_sentence_length REAL,
+    sentence_count INTEGER,
+    sample_count INTEGER,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_fingerprint_novel ON voice_fingerprint(novel_id);
