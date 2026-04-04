@@ -115,8 +115,8 @@ export const bibleApi = {
   /** 后端 202 即返回，但冷启动/代理连后端较慢时默认 30s 不够，易报 timeout of 30000ms exceeded */
   generateBible: (novelId: string, stage: string = 'all') =>
     apiClient.post<{ message: string; novel_id: string; status_url: string }>(
-      `/bible/novels/${novelId}/generate`,
-      { stage },
+      `/bible/novels/${novelId}/generate?stage=${stage}`,
+      {},
       { timeout: 120_000 }
     ) as Promise<{ message: string; novel_id: string; status_url: string }>,
 

@@ -43,7 +43,8 @@ class BibleService:
         novel_id: str,
         character_id: str,
         name: str,
-        description: str
+        description: str,
+        relationships: list = None
     ) -> BibleDTO:
         """添加人物
 
@@ -52,6 +53,7 @@ class BibleService:
             character_id: 人物 ID
             name: 人物名称
             description: 人物描述
+            relationships: 人物关系列表
 
         Returns:
             更新后的 BibleDTO
@@ -66,7 +68,8 @@ class BibleService:
         character = Character(
             id=CharacterId(character_id),
             name=name,
-            description=description
+            description=description,
+            relationships=relationships or []
         )
         bible.add_character(character)
         self.bible_repository.save(bible)
@@ -117,7 +120,8 @@ class BibleService:
         location_id: str,
         name: str,
         description: str,
-        location_type: str
+        location_type: str,
+        connections: list = None
     ) -> BibleDTO:
         """添加地点
 
@@ -127,6 +131,7 @@ class BibleService:
             name: 地点名称
             description: 地点描述
             location_type: 地点类型
+            connections: 地点关系列表
 
         Returns:
             更新后的 BibleDTO
@@ -142,7 +147,8 @@ class BibleService:
             id=location_id,
             name=name,
             description=description,
-            location_type=location_type
+            location_type=location_type,
+            connections=connections or []
         )
         bible.add_location(location)
         self.bible_repository.save(bible)

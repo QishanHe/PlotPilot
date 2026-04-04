@@ -1,11 +1,15 @@
 """自动 Bible 生成器 - 从小说标题生成完整的人物、地点、风格设定和世界观"""
 import logging
 import json
+import uuid
 from typing import Dict, Any
+from datetime import datetime
 from domain.ai.services.llm_service import LLMService, GenerationConfig
 from domain.ai.value_objects.prompt import Prompt
 from application.services.bible_service import BibleService
 from application.services.worldbuilding_service import WorldbuildingService
+from domain.bible.triple import Triple, SourceType
+from infrastructure.persistence.database.triple_repository import TripleRepository
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +24,11 @@ class AutoBibleGenerator:
     - 世界观（5维度框架）
     """
 
-    def __init__(self, llm_service: LLMService, bible_service: BibleService, worldbuilding_service: WorldbuildingService = None):
+    def __init__(self, llm_service: LLMService, bible_service: BibleService, worldbuilding_service: WorldbuildingService = None, triple_repository: TripleRepository = None):
         self.llm_service = llm_service
         self.bible_service = bible_service
         self.worldbuilding_service = worldbuilding_service
+        self.triple_repository = triple_repository
 
     async def generate_and_save(
         self,
@@ -118,6 +123,7 @@ class AutoBibleGenerator:
             existing_worldbuilding = self._load_worldbuilding(novel_id)
             bible_data = await self._generate_characters(premise, target_chapters, existing_worldbuilding)
             # 保存人物
+            character_ids = []
             for idx, char_data in enumerate(bible_data.get("characters", [])):
                 character_id = f"{novel_id}-char-{idx+1}"
                 try:
@@ -125,8 +131,10 @@ class AutoBibleGenerator:
                         novel_id=novel_id,
                         character_id=character_id,
                         name=char_data["name"],
-                        description=f"{char_data['role']} - {char_data['description']}"
+                        description=f"{char_data['role']} - {char_data['description']}",
+                        relationships=char_data.get("relationships", [])
                     )
+                    character_ids.append((character_id, char_data))
                     logger.info(f"Character saved: {character_id}")
                 except Exception as e:
                     if "already exists" in str(e):
@@ -134,6 +142,10 @@ class AutoBibleGenerator:
                     else:
                         logger.error(f"Failed to save character: {e}")
                         raise
+
+            # 从人物关系生成三元组
+            if self.triple_repository:
+                await self._generate_character_triples(novel_id, character_ids)
 
         elif stage == "locations":
             # 确保Bible记录存在
@@ -149,6 +161,7 @@ class AutoBibleGenerator:
             existing_characters = self._load_characters(novel_id)
             bible_data = await self._generate_locations(premise, target_chapters, existing_worldbuilding, existing_characters)
             # 保存地点
+            location_ids = []
             for idx, loc_data in enumerate(bible_data.get("locations", [])):
                 location_id = f"{novel_id}-loc-{idx+1}"
                 try:
@@ -157,8 +170,10 @@ class AutoBibleGenerator:
                         location_id=location_id,
                         name=loc_data["name"],
                         description=loc_data["description"],
-                        location_type=loc_data.get("type", "场景")
+                        location_type=loc_data.get("type", "场景"),
+                        connections=loc_data.get("connections", [])
                     )
+                    location_ids.append((location_id, loc_data))
                     logger.info(f"Location saved: {location_id}")
                 except Exception as e:
                     if "already exists" in str(e):
@@ -166,6 +181,10 @@ class AutoBibleGenerator:
                     else:
                         logger.error(f"Failed to save location: {e}")
                         raise
+
+            # 从地点连接生成三元组
+            if self.triple_repository:
+                await self._generate_location_triples(novel_id, location_ids)
 
         else:
             raise ValueError(f"Unknown stage: {stage}")
@@ -499,6 +518,7 @@ JSON 格式：
 2. 人物要符合世界观设定
 3. 确保人物之间有冲突和互动
 4. 每个人物：姓名、定位、性格特点、目标动机
+5. 明确定义人物之间的关系（敌对、合作、师徒、亲属、暧昧等）
 
 JSON 格式：
 {
@@ -506,7 +526,14 @@ JSON 格式：
     {
       "name": "人物名",
       "role": "主角/配角/对手/导师",
-      "description": "性格、背景、目标、特点，所有内容在一行内，用逗号分隔"
+      "description": "性格、背景、目标、特点，所有内容在一行内，用逗号分隔",
+      "relationships": [
+        {
+          "target": "目标人物名",
+          "relation": "关系类型（师徒/敌对/合作/亲属/暧昧等）",
+          "description": "关系的详细描述"
+        }
+      ]
     }
   ]
 }"""
@@ -534,6 +561,7 @@ JSON 格式：
 2. 地点要符合世界观设定
 3. 考虑人物的活动范围和故事需要
 4. 包含不同类型：城市、建筑、区域、特殊场所等
+5. 明确地点之间的空间关系（相邻、包含、通往等）
 
 JSON 格式：
 {
@@ -541,7 +569,14 @@ JSON 格式：
     {
       "name": "地点名",
       "type": "城市/建筑/区域/特殊场所",
-      "description": "地点描述，单行文本"
+      "description": "地点描述，单行文本",
+      "connections": [
+        {
+          "target": "目标地点名",
+          "relation": "连接类型（包含/相邻/通往/位于等）",
+          "description": "连接的详细描述"
+        }
+      ]
     }
   ]
 }"""
@@ -598,4 +633,138 @@ JSON 格式：
             logger.error(f"Failed to parse JSON: {e}")
             logger.error(f"Raw content: {content[:500]}")
             return {}
+
+    async def _generate_character_triples(self, novel_id: str, character_ids: list):
+        """从人物关系生成三元组"""
+        logger.info(f"Generating character relationship triples for {novel_id}")
+
+        # 创建人物名称到ID的映射
+        name_to_id = {char_data["name"]: char_id for char_id, char_data in character_ids}
+
+        for char_id, char_data in character_ids:
+            relationships = char_data.get("relationships", [])
+            if not relationships:
+                continue
+
+            for rel in relationships:
+                # 支持两种格式：字符串或对象
+                if isinstance(rel, str):
+                    # 旧格式：字符串描述，尝试解析
+                    target_name = None
+                    predicate = "关系"
+                    description = rel
+
+                    # 简单的名称匹配
+                    for other_id, other_data in character_ids:
+                        if other_id != char_id and other_data["name"] in rel:
+                            target_name = other_data["name"]
+                            break
+
+                    # 提取关系类型
+                    if "师徒" in rel or "师从" in rel:
+                        predicate = "师徒关系"
+                    elif "朋友" in rel or "好友" in rel:
+                        predicate = "朋友"
+                    elif "敌对" in rel or "对手" in rel:
+                        predicate = "敌对"
+                    elif "家人" in rel or "亲属" in rel:
+                        predicate = "家人"
+                    elif "同事" in rel or "同僚" in rel:
+                        predicate = "同事"
+                else:
+                    # 新格式：对象 {target, relation, description}
+                    target_name = rel.get("target")
+                    predicate = rel.get("relation", "关系")
+                    description = rel.get("description", "")
+
+                # 查找目标人物ID
+                target_char_id = name_to_id.get(target_name)
+
+                # 如果找到了目标人物，创建三元组
+                if target_char_id:
+                    triple = Triple(
+                        id=f"triple-{uuid.uuid4().hex[:8]}",
+                        novel_id=novel_id,
+                        subject_type="character",
+                        subject_id=char_id,
+                        predicate=predicate,
+                        object_type="character",
+                        object_id=target_char_id,
+                        confidence=0.9,
+                        source_type=SourceType.INFERRED,
+                        description=description,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    try:
+                        await self.triple_repository.save(triple)
+                        logger.info(f"Created triple: {char_data['name']} -{predicate}-> {target_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to save triple: {e}")
+
+    async def _generate_location_triples(self, novel_id: str, location_ids: list):
+        """从地点连接生成三元组"""
+        logger.info(f"Generating location connection triples for {novel_id}")
+
+        # 创建地点名称到ID的映射
+        name_to_id = {loc_data["name"]: loc_id for loc_id, loc_data in location_ids}
+
+        for loc_id, loc_data in location_ids:
+            connections = loc_data.get("connections", [])
+            if not connections:
+                continue
+
+            for conn in connections:
+                # 支持两种格式：字符串或对象
+                if isinstance(conn, str):
+                    # 旧格式：字符串描述，尝试解析
+                    target_name = None
+                    predicate = "连接"
+                    description = conn
+
+                    # 简单的名称匹配
+                    for other_id, other_data in location_ids:
+                        if other_id != loc_id and other_data["name"] in conn:
+                            target_name = other_data["name"]
+                            break
+
+                    # 提取连接类型
+                    if "包含" in conn or "内部" in conn:
+                        predicate = "包含"
+                    elif "相邻" in conn or "毗邻" in conn:
+                        predicate = "相邻"
+                    elif "通往" in conn or "通向" in conn:
+                        predicate = "通往"
+                    elif "位于" in conn:
+                        predicate = "位于"
+                else:
+                    # 新格式：对象 {target, relation, description}
+                    target_name = conn.get("target")
+                    predicate = conn.get("relation", "连接")
+                    description = conn.get("description", "")
+
+                # 查找目标地点ID
+                target_loc_id = name_to_id.get(target_name)
+
+                # 如果找到了目标地点，创建三元组
+                if target_loc_id:
+                    triple = Triple(
+                        id=f"triple-{uuid.uuid4().hex[:8]}",
+                        novel_id=novel_id,
+                        subject_type="location",
+                        subject_id=loc_id,
+                        predicate=predicate,
+                        object_type="location",
+                        object_id=target_loc_id,
+                        confidence=0.9,
+                        source_type=SourceType.INFERRED,
+                        description=description,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    try:
+                        await self.triple_repository.save(triple)
+                        logger.info(f"Created triple: {loc_data['name']} -{predicate}-> {target_loc_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to save triple: {e}")
 
