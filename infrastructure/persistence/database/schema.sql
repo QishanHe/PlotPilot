@@ -363,3 +363,31 @@ CREATE TABLE IF NOT EXISTS plot_points (
 );
 
 CREATE INDEX IF NOT EXISTS idx_plot_points_arc ON plot_points(plot_arc_id, sort_order);
+
+-- ========== 事件溯源架构（Event Sourcing）==========
+-- entity_base：静态基座（core_attributes 为 JSON 文本）
+CREATE TABLE IF NOT EXISTS entity_base (
+    id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    core_attributes TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_base_novel ON entity_base(novel_id, entity_type);
+
+-- narrative_events：章节事件流（mutations 为 JSON 文本数组）
+CREATE TABLE IF NOT EXISTS narrative_events (
+    event_id TEXT PRIMARY KEY,
+    novel_id TEXT NOT NULL,
+    chapter_number INTEGER NOT NULL,
+    event_summary TEXT NOT NULL DEFAULT '',
+    mutations TEXT NOT NULL DEFAULT '[]',
+    timestamp_ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (novel_id) REFERENCES novels(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_events_novel_chapter
+    ON narrative_events(novel_id, chapter_number);
