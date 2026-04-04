@@ -10,3 +10,18 @@ output/novels/*/
 *.log
 *.pid
 *.egg-info/
+
+# Database files
+*.db
+*.db.backup
+*.sqlite
+*.sqlite3
+
+# Generated bible files
+data/bibles/bible-novel-*.json
+data/bibles/novel-*-bible.json
+data/bibles/bible-test-*.json
+data/bibles/bible-final-*.json
+
+# Temporary data
+interfaces/data/
