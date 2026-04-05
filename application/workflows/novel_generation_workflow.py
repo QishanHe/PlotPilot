@@ -5,12 +5,12 @@
 """
 import logging
 from typing import List, Optional
-from application.services.novel_service import NovelService
-from application.services.chapter_service import ChapterService
-from application.services.bible_service import BibleService
-from application.services.ai_generation_service import AIGenerationService
-from application.dtos.novel_dto import NovelDTO
-from application.dtos.chapter_dto import ChapterDTO
+from application.core.services.novel_service import NovelService
+from application.core.services.chapter_service import ChapterService
+from application.world.services.bible_service import BibleService
+from application.engine.services.ai_generation_service import AIGenerationService
+from application.core.dtos.novel_dto import NovelDTO
+from application.core.dtos.chapter_dto import ChapterDTO
 from domain.shared.exceptions import EntityNotFoundError
 
 logger = logging.getLogger(__name__)

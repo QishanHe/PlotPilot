@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from application.services.scene_director_service import SceneDirectorService
+    from application.engine.services.scene_director_service import SceneDirectorService
     from infrastructure.ai.qdrant_vector_store import QdrantVectorStore
 
 from application.paths import DATA_DIR
@@ -30,28 +30,28 @@ from infrastructure.persistence.database.sqlite_timeline_repository import Sqlit
 from infrastructure.ai.providers.anthropic_provider import AnthropicProvider
 from infrastructure.ai.config.settings import Settings
 
-from application.services.novel_service import NovelService
-from application.services.chapter_service import ChapterService
-from application.services.bible_service import BibleService
-from application.services.cast_service import CastService
-from application.services.knowledge_service import KnowledgeService
-from application.services.voice_sample_service import VoiceSampleService
-from application.services.voice_fingerprint_service import VoiceFingerprintService
-from application.services.voice_drift_service import VoiceDriftService
-from application.services.context_builder import ContextBuilder
-from application.services.auto_bible_generator import AutoBibleGenerator
-from application.services.auto_knowledge_generator import AutoKnowledgeGenerator
-from application.services.state_extractor import StateExtractor
-from application.services.state_updater import StateUpdater
+from application.core.services.novel_service import NovelService
+from application.core.services.chapter_service import ChapterService
+from application.world.services.bible_service import BibleService
+from application.world.services.cast_service import CastService
+from application.world.services.knowledge_service import KnowledgeService
+from application.analyst.services.voice_sample_service import VoiceSampleService
+from application.analyst.services.voice_fingerprint_service import VoiceFingerprintService
+from application.analyst.services.voice_drift_service import VoiceDriftService
+from application.engine.services.context_builder import ContextBuilder
+from application.world.services.auto_bible_generator import AutoBibleGenerator
+from application.world.services.auto_knowledge_generator import AutoKnowledgeGenerator
+from application.analyst.services.state_extractor import StateExtractor
+from application.analyst.services.state_updater import StateUpdater
 from application.workflows.auto_novel_generation_workflow import AutoNovelGenerationWorkflow
-from application.services.hosted_write_service import HostedWriteService
+from application.engine.services.hosted_write_service import HostedWriteService
 from domain.novel.services.consistency_checker import ConsistencyChecker
 from domain.novel.services.storyline_manager import StorylineManager
 from domain.bible.services.relationship_engine import RelationshipEngine
 from domain.ai.services.vector_store import VectorStore
 
 if TYPE_CHECKING:
-    from application.services.narrative_entity_state_service import NarrativeEntityStateService
+    from application.analyst.services.narrative_entity_state_service import NarrativeEntityStateService
 
 
 logger = logging.getLogger(__name__)
@@ -216,7 +216,7 @@ def get_llm_service():
 
 def get_setup_main_plot_suggestion_service():
     """向导 Step 4：主线候选推演服务。"""
-    from application.services.setup_main_plot_suggestion_service import (
+    from application.blueprint.services.setup_main_plot_suggestion_service import (
         SetupMainPlotSuggestionService,
     )
 
@@ -234,7 +234,7 @@ def get_bible_service() -> BibleService:
         BibleService 实例
     """
     from application.paths import get_db_path
-    from application.services.bible_location_triple_sync import BibleLocationTripleSyncService
+    from application.world.services.bible_location_triple_sync import BibleLocationTripleSyncService
     from infrastructure.persistence.database.triple_repository import TripleRepository
 
     sync = BibleLocationTripleSyncService(TripleRepository(get_db_path()))
@@ -322,7 +322,7 @@ def get_chapter_indexing_service():
     es = get_embedding_service()
     if vs is None or es is None:
         return None
-    from application.services.chapter_indexing_service import ChapterIndexingService
+    from application.analyst.services.chapter_indexing_service import ChapterIndexingService
     return ChapterIndexingService(vs, es)
 
 
@@ -413,8 +413,8 @@ def get_auto_workflow() -> AutoNovelGenerationWorkflow:
         llm_service = MockProvider()
         logger.warning("No API key found, using MockProvider for workflow")
 
-    from application.services.conflict_detection_service import ConflictDetectionService
-    from application.services.cliche_scanner import ClicheScanner
+    from application.audit.services.conflict_detection_service import ConflictDetectionService
+    from application.audit.services.cliche_scanner import ClicheScanner
 
     return AutoNovelGenerationWorkflow(
         context_builder=get_context_builder(),
@@ -449,7 +449,7 @@ def get_auto_bible_generator() -> AutoBibleGenerator:
         logger.warning("No API key found, using MockProvider for Bible generation")
 
     # 导入 WorldbuildingService 和 TripleRepository
-    from application.services.worldbuilding_service import WorldbuildingService
+    from application.world.services.worldbuilding_service import WorldbuildingService
     from infrastructure.persistence.database.worldbuilding_repository import WorldbuildingRepository
     from infrastructure.persistence.database.triple_repository import TripleRepository
     from application.paths import get_db_path
@@ -521,7 +521,7 @@ def get_beat_sheet_service():
     Returns:
         BeatSheetService 实例
     """
-    from application.services.beat_sheet_service import BeatSheetService
+    from application.blueprint.services.beat_sheet_service import BeatSheetService
 
     settings = _anthropic_settings(require_key=False)
     if settings:
@@ -548,7 +548,7 @@ def get_scene_generation_service():
     Returns:
         SceneGenerationService 实例
     """
-    from application.services.scene_generation_service import SceneGenerationService
+    from application.core.services.scene_generation_service import SceneGenerationService
 
     settings = _anthropic_settings(require_key=False)
     if settings:
@@ -573,7 +573,7 @@ def get_scene_director_service() -> "SceneDirectorService":
     Returns:
         SceneDirectorService 实例
     """
-    from application.services.scene_director_service import SceneDirectorService
+    from application.engine.services.scene_director_service import SceneDirectorService
 
     settings = _anthropic_settings(require_key=False)
     if settings:
@@ -592,7 +592,7 @@ def get_narrative_entity_state_service() -> "NarrativeEntityStateService":
     Returns:
         NarrativeEntityStateService 实例
     """
-    from application.services.narrative_entity_state_service import NarrativeEntityStateService
+    from application.analyst.services.narrative_entity_state_service import NarrativeEntityStateService
     from infrastructure.persistence.database.sqlite_entity_base_repository import SqliteEntityBaseRepository
     from infrastructure.persistence.database.sqlite_narrative_event_repository import SqliteNarrativeEventRepository
 
@@ -659,7 +659,7 @@ def get_macro_refactor_scanner():
     Returns:
         MacroRefactorScanner 实例
     """
-    from application.services.macro_refactor_scanner import MacroRefactorScanner
+    from application.audit.services.macro_refactor_scanner import MacroRefactorScanner
     from infrastructure.persistence.database.sqlite_narrative_event_repository import SqliteNarrativeEventRepository
 
     narrative_event_repo = SqliteNarrativeEventRepository(get_database())
@@ -672,7 +672,7 @@ def get_macro_refactor_proposal_service():
     Returns:
         MacroRefactorProposalService 实例
     """
-    from application.services.macro_refactor_proposal_service import MacroRefactorProposalService
+    from application.audit.services.macro_refactor_proposal_service import MacroRefactorProposalService
 
     settings = _anthropic_settings(require_key=False)
     if settings:
@@ -692,7 +692,7 @@ def get_mutation_applier():
     Returns:
         MutationApplier 实例
     """
-    from application.services.mutation_applier import MutationApplier
+    from application.audit.services.mutation_applier import MutationApplier
     from infrastructure.persistence.database.sqlite_narrative_event_repository import SqliteNarrativeEventRepository
 
     narrative_event_repo = SqliteNarrativeEventRepository(get_database())
@@ -705,7 +705,7 @@ def get_tension_analyzer():
     Returns:
         TensionAnalyzer 实例
     """
-    from application.services.tension_analyzer import TensionAnalyzer
+    from application.analyst.services.tension_analyzer import TensionAnalyzer
     from infrastructure.persistence.database.sqlite_narrative_event_repository import SqliteNarrativeEventRepository
     from infrastructure.ai.llm_client import LLMClient
 
@@ -729,7 +729,7 @@ def get_sandbox_dialogue_service():
     Returns:
         SandboxDialogueService 实例
     """
-    from application.services.sandbox_dialogue_service import SandboxDialogueService
+    from application.workbench.services.sandbox_dialogue_service import SandboxDialogueService
     from infrastructure.persistence.database.sqlite_narrative_event_repository import SqliteNarrativeEventRepository
 
     narrative_event_repo = SqliteNarrativeEventRepository(get_database())
@@ -742,7 +742,7 @@ def get_chapter_review_service():
     Returns:
         ChapterReviewService 实例
     """
-    from application.services.chapter_review_service import ChapterReviewService
+    from application.audit.services.chapter_review_service import ChapterReviewService
     from infrastructure.persistence.database.sqlite_chapter_repository import SqliteChapterRepository
     from infrastructure.persistence.database.sqlite_cast_repository import SqliteCastRepository
     from infrastructure.persistence.database.sqlite_timeline_repository import SqliteTimelineRepository

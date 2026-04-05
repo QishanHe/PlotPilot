@@ -22,9 +22,26 @@ except Exception:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from interfaces.api.v1 import novels, chapters, bible, cast, knowledge, generation, story_structure
-from interfaces.api.v1 import chapter_element_routes, knowledge_graph_routes, continuous_planning_routes
-from interfaces.api.v1 import worldbuilding_routes, context_intelligence, narrative_state, foreshadow_ledger, voice, macro_refactor, writer_block, sandbox, beat_sheet_routes, scene_generation_routes, chapter_review_routes
+# Core module
+from interfaces.api.v1.core import novels, chapters, scene_generation_routes, stats
+
+# World module
+from interfaces.api.v1.world import bible, cast, knowledge, knowledge_graph_routes, worldbuilding_routes
+
+# Blueprint module
+from interfaces.api.v1.blueprint import continuous_planning_routes, beat_sheet_routes, story_structure
+
+# Engine module
+from interfaces.api.v1.engine import generation, context_intelligence
+
+# Audit module
+from interfaces.api.v1.audit import chapter_review_routes, macro_refactor, chapter_element_routes
+
+# Analyst module
+from interfaces.api.v1.analyst import voice, narrative_state, foreshadow_ledger
+
+# Workbench module
+from interfaces.api.v1.workbench import sandbox, writer_block
 from web.routers.stats import create_stats_router
 from web.services.stats_service import StatsService
 from web.repositories.sqlite_stats_repository_adapter import SqliteStatsRepositoryAdapter
@@ -56,30 +73,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册新架构路由
+# Core module routes
 app.include_router(novels.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1/novels")
+app.include_router(scene_generation_routes.router)
+
+# World module routes
 app.include_router(bible.router, prefix="/api/v1")
 app.include_router(cast.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
-app.include_router(generation.router, prefix="/api/v1")
-app.include_router(story_structure.router, prefix="/api/v1")
-app.include_router(context_intelligence.router, prefix="/api/v1")
-app.include_router(narrative_state.router, prefix="/api/v1")
-app.include_router(foreshadow_ledger.router, prefix="/api/v1")
-app.include_router(voice.router, prefix="/api/v1")
-app.include_router(macro_refactor.router, prefix="/api/v1")
-app.include_router(writer_block.router, prefix="/api/v1")
-app.include_router(sandbox.router, prefix="/api/v1")
-
-# 注册统一的持续规划路由
-app.include_router(continuous_planning_routes.router)
-app.include_router(chapter_element_routes.router)
 app.include_router(knowledge_graph_routes.router)
 app.include_router(worldbuilding_routes.router)
+
+# Blueprint module routes
+app.include_router(continuous_planning_routes.router)
 app.include_router(beat_sheet_routes.router)
-app.include_router(scene_generation_routes.router)
+app.include_router(story_structure.router, prefix="/api/v1")
+
+# Engine module routes
+app.include_router(generation.router, prefix="/api/v1")
+app.include_router(context_intelligence.router, prefix="/api/v1")
+
+# Audit module routes
 app.include_router(chapter_review_routes.router)
+app.include_router(macro_refactor.router, prefix="/api/v1")
+app.include_router(chapter_element_routes.router)
+
+# Analyst module routes
+app.include_router(voice.router, prefix="/api/v1")
+app.include_router(narrative_state.router, prefix="/api/v1")
+app.include_router(foreshadow_ledger.router, prefix="/api/v1")
+
+# Workbench module routes
+app.include_router(writer_block.router, prefix="/api/v1")
+app.include_router(sandbox.router, prefix="/api/v1")
 
 # 注册统计路由（使用 SQLite 适配器）
 stats_repository = SqliteStatsRepositoryAdapter(get_database())

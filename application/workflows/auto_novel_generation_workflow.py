@@ -4,14 +4,14 @@
 """
 import logging
 from typing import Tuple, Dict, Any, AsyncIterator, Optional, List
-from application.services.context_builder import ContextBuilder
-from application.services.state_extractor import StateExtractor
-from application.services.state_updater import StateUpdater
-from application.services.conflict_detection_service import ConflictDetectionService
-from application.services.style_constraint_builder import build_style_summary
-from application.dtos.generation_result import GenerationResult
-from application.dtos.scene_director_dto import SceneDirectorAnalysis
-from application.dtos.ghost_annotation import GhostAnnotation
+from application.engine.services.context_builder import ContextBuilder
+from application.analyst.services.state_extractor import StateExtractor
+from application.analyst.services.state_updater import StateUpdater
+from application.audit.services.conflict_detection_service import ConflictDetectionService
+from application.engine.services.style_constraint_builder import build_style_summary
+from application.engine.dtos.generation_result import GenerationResult
+from application.engine.dtos.scene_director_dto import SceneDirectorAnalysis
+from application.audit.dtos.ghost_annotation import GhostAnnotation
 from domain.novel.services.consistency_checker import ConsistencyChecker
 from domain.novel.services.storyline_manager import StorylineManager
 from domain.novel.repositories.plot_arc_repository import PlotArcRepository
