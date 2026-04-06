@@ -18,6 +18,30 @@ router = APIRouter(prefix="/autopilot", tags=["autopilot"])
 PER_NOVEL_FAILURE_THRESHOLD = 3
 
 
+def _stage_name_zh(stage: str) -> str:
+    """阶段枚举值 → 中文（与前端驾驶舱一致）"""
+    m = {
+        "planning": "规划（旧）",
+        "macro_planning": "宏观规划",
+        "act_planning": "幕级规划",
+        "writing": "正文撰写",
+        "auditing": "章节审计",
+        "reviewing": "审阅（旧）",
+        "paused_for_review": "待审阅确认",
+        "completed": "全书完成",
+    }
+    return m.get(stage, stage)
+
+
+def _autopilot_status_zh(status: str) -> str:
+    return {
+        "stopped": "已停止",
+        "running": "运行中",
+        "error": "异常挂起",
+        "completed": "已完成",
+    }.get(status, status)
+
+
 class StartRequest(BaseModel):
     max_auto_chapters: Optional[int] = 50  # 本次托管最大章节数
 
@@ -174,20 +198,25 @@ async def autopilot_log_stream(novel_id: str):
     - stage_change: 阶段变更
     """
     novel_repo = get_novel_repository()
+    chapter_repo = get_chapter_repository()
 
     async def event_generator():
         # 发送初始连接事件
         init_event = {
             "type": "connected",
-            "message": "日志流已连接",
+            "message": "日志流已连接（阶段变更需连续约 4 秒一致才推送，避免界面抖动）",
             "timestamp": datetime.now().isoformat()
         }
         yield f"data: {json.dumps(init_event, ensure_ascii=False)}\n\n"
 
-        last_stage = None
         last_beat = None
         heartbeat_counter = 0
         last_error_broadcast = -1
+        # 阶段变更去抖：同一阶段需连续 2 次轮询（约 4s）一致才推送，避免幕级规划↔待审阅 来回刷屏
+        first_stage_poll = True
+        last_emitted_stage: Optional[str] = None
+        stage_pending: Optional[str] = None
+        stage_pending_ticks = 0
 
         while True:
             try:
@@ -198,41 +227,63 @@ async def autopilot_log_stream(novel_id: str):
                 current_stage = novel.current_stage.value
                 current_beat = getattr(novel, "current_beat_index", 0)
 
-                # 检测阶段变更
-                if last_stage is not None and current_stage != last_stage:
-                    event = {
-                        "type": "stage_change",
-                        "message": f"阶段变更: {last_stage} → {current_stage}",
-                        "timestamp": datetime.now().isoformat(),
-                        "metadata": {
-                            "from_stage": last_stage,
-                            "to_stage": current_stage
+                # 检测阶段变更（去抖后推送）
+                if first_stage_poll:
+                    last_emitted_stage = current_stage
+                    first_stage_poll = False
+                elif current_stage == last_emitted_stage:
+                    stage_pending = None
+                    stage_pending_ticks = 0
+                else:
+                    if stage_pending != current_stage:
+                        stage_pending = current_stage
+                        stage_pending_ticks = 1
+                    else:
+                        stage_pending_ticks += 1
+                    if stage_pending_ticks >= 2 and current_stage != last_emitted_stage:
+                        from_zh = _stage_name_zh(last_emitted_stage or current_stage)
+                        to_zh = _stage_name_zh(current_stage)
+                        event = {
+                            "type": "stage_change",
+                            "message": f"阶段变更：{from_zh} → {to_zh}",
+                            "timestamp": datetime.now().isoformat(),
+                            "metadata": {
+                                "from_stage": last_emitted_stage,
+                                "to_stage": current_stage,
+                                "from_label": from_zh,
+                                "to_label": to_zh,
+                            },
                         }
-                    }
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        last_emitted_stage = current_stage
+                        stage_pending = None
+                        stage_pending_ticks = 0
 
                 # 检测 beat 变更（表示上一个 beat 完成）
+                act_display = (novel.current_act or 0) + 1
                 if last_beat is not None and current_beat > last_beat:
                     event = {
                         "type": "beat_complete",
-                        "message": f"Beat {last_beat} 生成完成",
+                        "message": f"第 {act_display} 幕 · 节拍 {last_beat} 已生成完毕",
                         "timestamp": datetime.now().isoformat(),
                         "metadata": {
                             "beat_index": last_beat,
-                            "act": novel.current_act
-                        }
+                            "act": novel.current_act,
+                            "act_display": act_display,
+                        },
                     }
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                     # 新 beat 开始
                     event = {
                         "type": "beat_start",
-                        "message": f"开始生成 Beat {current_beat}",
+                        "message": f"第 {act_display} 幕 · 正在生成节拍 {current_beat}",
                         "timestamp": datetime.now().isoformat(),
                         "metadata": {
                             "beat_index": current_beat,
-                            "act": novel.current_act
-                        }
+                            "act": novel.current_act,
+                            "act_display": act_display,
+                        },
                     }
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -240,34 +291,80 @@ async def autopilot_log_stream(novel_id: str):
                 error_count = getattr(novel, "consecutive_error_count", 0) or 0
                 if error_count > 0 and error_count != last_error_broadcast:
                     last_error_broadcast = error_count
+                    if error_count >= 3:
+                        err_msg = (
+                            f"连续失败已达 {error_count} 次，本书可能被标为异常并停止；"
+                            "请在驾驶舱「解除挂起并清零计数」后重试，并确认守护进程与 LLM 可用。"
+                        )
+                    else:
+                        err_msg = (
+                            f"记录到连续失败 {error_count} 次（满 3 次将挂起）。"
+                            "若持续出现，请检查模型/API 与守护进程日志。"
+                        )
                     event = {
                         "type": "beat_error",
-                        "message": f"生成遇到错误（连续 {error_count} 次）",
+                        "message": err_msg,
                         "timestamp": datetime.now().isoformat(),
-                        "metadata": {
-                            "error_count": error_count
-                        }
+                        "metadata": {"error_count": error_count},
                     }
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 if error_count == 0:
                     last_error_broadcast = -1
 
-                last_stage = current_stage
                 last_beat = current_beat
 
                 # 终止条件
                 terminal_states = {"stopped", "error", "completed"}
                 if novel.autopilot_status.value in terminal_states:
+                    st = novel.autopilot_status.value
                     event = {
                         "type": "autopilot_complete",
-                        "message": f"自动驾驶已{novel.autopilot_status.value}",
+                        "message": f"自动驾驶{_autopilot_status_zh(st)}",
                         "timestamp": datetime.now().isoformat(),
                         "metadata": {
-                            "status": novel.autopilot_status.value
-                        }
+                            "status": st,
+                            "status_label": _autopilot_status_zh(st),
+                        },
                     }
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     break
+
+                # 运行中：定期推送进度快照（仅用于前端进度条，不写时间线刷屏）
+                if novel.autopilot_status.value == AutopilotStatus.RUNNING.value:
+                    chapters = chapter_repo.list_by_novel(NovelId(novel_id))
+                    _st = lambda c: c.status.value if hasattr(c.status, "value") else c.status
+                    completed = [c for c in chapters if _st(c) == "completed"]
+                    n_done = len(completed)
+                    tgt = novel.target_chapters or 1
+                    pct = round(n_done / tgt * 100, 1) if tgt else 0.0
+                    total_words = sum(
+                        c.word_count.value if hasattr(c.word_count, "value") else c.word_count
+                        for c in chapters
+                        if c.word_count
+                    )
+                    stage_zh = _stage_name_zh(current_stage)
+                    act_display = (novel.current_act or 0) + 1
+                    tw = int(total_words) if total_words else 0
+                    progress_event = {
+                        "type": "progress",
+                        "message": (
+                            f"全书 {n_done}/{tgt} 章 · 约 {tw} 字 · "
+                            f"第 {act_display} 幕 · 节拍 {current_beat} · {stage_zh}"
+                        ),
+                        "timestamp": datetime.now().isoformat(),
+                        "metadata": {
+                            "completed_chapters": n_done,
+                            "target_chapters": tgt,
+                            "progress_pct": pct,
+                            "total_words": total_words,
+                            "current_act": novel.current_act,
+                            "act_display": act_display,
+                            "current_beat_index": current_beat,
+                            "stage": current_stage,
+                            "stage_label": stage_zh,
+                        },
+                    }
+                    yield f"data: {json.dumps(progress_event, ensure_ascii=False)}\n\n"
 
                 # 每 10 次循环（20秒）发送一次心跳
                 heartbeat_counter += 1
