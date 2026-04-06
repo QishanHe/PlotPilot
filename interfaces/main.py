@@ -42,7 +42,7 @@ from interfaces.api.v1.world import bible, cast, knowledge, knowledge_graph_rout
 # Blueprint module
 from interfaces.api.v1.blueprint import continuous_planning_routes, beat_sheet_routes, story_structure
 
-# Engine module
+# Engine module routes
 from interfaces.api.v1.engine import (
     generation,
     context_intelligence,
@@ -50,6 +50,7 @@ from interfaces.api.v1.engine import (
     chronicles,
     snapshot_routes,
     workbench_context_routes,
+    character_scheduler_routes,  # 角色调度API（正式功能）
 )
 
 # Audit module
@@ -137,6 +138,7 @@ app.include_router(chronicles.router, prefix="/api/v1")
 app.include_router(snapshot_routes.router, prefix="/api/v1")
 app.include_router(autopilot_routes.router, prefix="/api/v1")
 app.include_router(workbench_context_routes.router, prefix="/api/v1")
+app.include_router(character_scheduler_routes.router, prefix="/api/v1")  # 角色调度服务
 
 # Audit module routes
 app.include_router(chapter_review_routes.router)

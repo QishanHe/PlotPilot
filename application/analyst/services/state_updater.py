@@ -1,6 +1,7 @@
 import uuid
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 from domain.novel.value_objects.chapter_state import ChapterState
 from domain.novel.value_objects.novel_id import NovelId
 from domain.bible.entities.character import Character
@@ -36,13 +37,17 @@ class StateUpdater:
         foreshadowing_repository: ForeshadowingRepository,
         timeline_repository: Optional[TimelineRepository] = None,
         storyline_repository: Optional[StorylineRepository] = None,
-        knowledge_service=None
+        knowledge_service=None,
+        chapter_repository=None,
+        db_connection=None
     ):
         self.bible_repository = bible_repository
         self.foreshadowing_repository = foreshadowing_repository
         self.timeline_repository = timeline_repository
         self.storyline_repository = storyline_repository
         self.knowledge_service = knowledge_service
+        self.chapter_repository = chapter_repository
+        self.db_connection = db_connection
 
     def update_from_chapter(
         self,
@@ -230,6 +235,10 @@ class StateUpdater:
         if self.knowledge_service:
             self._update_knowledge(novel_id, chapter_number, chapter_state)
 
+        # 写入 chapter_elements（角色出场信息）
+        if chapter_state.has_new_characters() and self.db_connection:
+            self._write_chapter_elements(novel_id, chapter_number, chapter_state.new_characters)
+
     def _update_knowledge(
         self,
         novel_id: str,
@@ -294,3 +303,94 @@ class StateUpdater:
                     )
         except Exception as e:
             logger.warning(f"Failed to update Knowledge for novel {novel_id}: {e}")
+
+    def _write_chapter_elements(
+        self,
+        novel_id: str,
+        chapter_number: int,
+        new_characters: List[Dict[str, Any]]
+    ) -> None:
+        """写入角色出场信息到 chapter_elements 表
+
+        Args:
+            novel_id: 小说ID
+            chapter_number: 章节号
+            new_characters: 新角色列表
+        """
+        try:
+            # 获取 chapter_id（需要查询 story_nodes 表）
+            from domain.novel.value_objects.chapter_id import ChapterId
+
+            # 简化实现：直接使用数据库连接查询
+            # 实际项目中应该通过 chapter_repository 获取
+            cursor = self.db_connection.cursor()
+
+            # 查询章节对应的 story_node_id
+            cursor.execute(
+                """
+                SELECT id FROM story_nodes
+                WHERE novel_id = ? AND node_type = 'chapter' AND number = ?
+                LIMIT 1
+                """,
+                (novel_id, chapter_number)
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                logger.warning(f"Story node not found for chapter {chapter_number}")
+                return
+
+            chapter_id = row[0]
+
+            # 批量插入角色出场记录
+            inserted_count = 0
+            for char_data in new_characters:
+                char_name = char_data.get("name", "")
+                if not char_name:
+                    continue
+
+                # 查询角色ID
+                cursor.execute(
+                    """
+                    SELECT id FROM bible_characters
+                    WHERE novel_id = ? AND name = ?
+                    LIMIT 1
+                    """,
+                    (novel_id, char_name)
+                )
+                char_row = cursor.fetchone()
+                char_id = char_row[0] if char_row else str(uuid.uuid4())
+
+                # 插入 chapter_elements
+                element_id = f"elem-{uuid.uuid4().hex[:8]}"
+
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO chapter_elements (
+                            id, chapter_id, element_type, element_id,
+                            relation_type, importance, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            element_id,
+                            chapter_id,
+                            'character',
+                            char_id,
+                            'appears',
+                            'normal',
+                            datetime.now().isoformat()
+                        )
+                    )
+                    inserted_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to insert chapter_element for {char_name}: {e}")
+
+            self.db_connection.commit()
+            logger.info(f"Written {inserted_count} character appearances to chapter_elements")
+
+        except Exception as e:
+            logger.error(f"Failed to write chapter_elements: {e}", exc_info=True)
+            if self.db_connection:
+                self.db_connection.rollback()

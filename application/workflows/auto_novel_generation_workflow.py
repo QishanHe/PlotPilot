@@ -99,8 +99,27 @@ class AutoNovelGenerationWorkflow:
         self.storyline_manager = storyline_manager
         self.plot_arc_repository = plot_arc_repository
         self.llm_service = llm_service
-        self.state_extractor = state_extractor
-        self.state_updater = state_updater
+        
+        # 强制初始化 StateExtractor（如果未提供）
+        if state_extractor is None:
+            logger.info("StateExtractor not provided, creating default instance")
+            self.state_extractor = StateExtractor(llm_service=llm_service)
+        else:
+            self.state_extractor = state_extractor
+        
+        # 强制初始化 StateUpdater（如果未提供且有所需仓储）
+        if state_updater is None and bible_repository and foreshadowing_repository:
+            logger.info("StateUpdater not provided, creating default instance")
+            from infrastructure.persistence.database.connection import get_database
+            db = get_database()
+            self.state_updater = StateUpdater(
+                bible_repository=bible_repository,
+                foreshadowing_repository=foreshadowing_repository,
+                db_connection=db.get_connection()
+            )
+        else:
+            self.state_updater = state_updater
+        
         self.bible_repository = bible_repository
         self.foreshadowing_repository = foreshadowing_repository
         self.conflict_detection_service = conflict_detection_service

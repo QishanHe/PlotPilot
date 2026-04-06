@@ -5,6 +5,7 @@ import Chapter from '../views/Chapter.vue'
 import Cast from '../views/Cast.vue'
 import CharacterGraph from '../views/CharacterGraph.vue'
 import LocationGraph from '../views/LocationGraph.vue'
+import CharacterSchedulerSimulator from '../components/debug/CharacterSchedulerSimulator.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,7 @@ const router = createRouter({
     { path: '/book/:slug/chapter/:id', name: 'Chapter', component: Chapter },
     { path: '/book/:slug/characters', name: 'CharacterGraph', component: CharacterGraph },
     { path: '/book/:slug/location-graph', name: 'LocationGraph', component: LocationGraph },
+    { path: '/debug/scheduler', name: 'CharacterSchedulerSimulator', component: CharacterSchedulerSimulator },
   ],
 })
 

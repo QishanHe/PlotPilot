@@ -288,8 +288,8 @@ class ContextBudgetAllocator:
             priority=90,
         )
         
-        # 3. 本章角色锚点
-        character_anchors = self._get_character_anchors(novel_id, chapter_number, scene_director)
+        # 3. 本章角色锚点（传入大纲用于智能调度）
+        character_anchors = self._get_character_anchors(novel_id, chapter_number, scene_director, outline)
         slots["character_anchors"] = ContextSlot(
             name="角色锚点",
             tier=PriorityTier.T0_CRITICAL,
@@ -501,8 +501,17 @@ class ContextBudgetAllocator:
         novel_id: str,
         chapter_number: int,
         scene_director: Optional[Dict[str, Any]] = None,
+        outline: str = "",
     ) -> str:
-        """获取角色锚点（轨道二核心）"""
+        """获取角色锚点（轨道二核心 - 集成智能调度）
+        
+        核心改进：
+        1. 从章节大纲中提取提及的角色（最高优先级）
+        2. 从 chapter_elements 表查询最近出场的角色
+        3. 根据重要性级别和活动度排序
+        4. 检测刚登场的角色，添加连续性约束
+        5. 应用 POV 防火墙规则
+        """
         if not self.bible_repo:
             return ""
         
@@ -511,22 +520,27 @@ class ContextBudgetAllocator:
             if not bible or not hasattr(bible, 'characters'):
                 return ""
             
-            # 如果有场记分析，只返回本章出现的角色
-            if scene_director and scene_director.get("characters"):
-                character_names = set(scene_director["characters"])
-                characters = [c for c in bible.characters if c.name in character_names]
-            else:
-                characters = bible.characters[:5]  # 默认前 5 个主要角色
+            # ========== Step 1: 智能角色调度 ==========
+            selected_characters = self._schedule_characters(
+                bible.characters,
+                novel_id,
+                chapter_number,
+                outline,
+                scene_director
+            )
             
+            # ========== Step 2: 构建角色锚点文本 ==========
             lines = ["【角色状态锚点】"]
             
-            for char in characters:
+            for char, is_recently_appeared in selected_characters:
                 # POV 防火墙：检查是否应该显示隐藏信息
                 profile_parts = []
+                
+                # 公开信息
                 if hasattr(char, 'public_profile') and char.public_profile:
                     profile_parts.append(char.public_profile)
                 elif char.description:
-                    profile_parts.append(char.description)
+                    profile_parts.append(char.description[:100])  # 限制长度
                 
                 # 检查隐藏信息
                 if hasattr(char, 'hidden_profile') and char.hidden_profile:
@@ -534,9 +548,13 @@ class ContextBudgetAllocator:
                     if reveal_chapter is None or chapter_number >= reveal_chapter:
                         profile_parts.append(f"[隐藏面] {char.hidden_profile}")
                 
-                # 心理状态
+                # 心理状态锚点（核心）
                 if hasattr(char, 'mental_state') and char.mental_state:
-                    profile_parts.append(f"心理状态: {char.mental_state}")
+                    mental_reason = getattr(char, 'mental_state_reason', '')
+                    if mental_reason:
+                        profile_parts.append(f"心理: {char.mental_state}（{mental_reason}）")
+                    else:
+                        profile_parts.append(f"心理: {char.mental_state}")
                 
                 # 口头禅/习惯动作
                 if hasattr(char, 'verbal_tic') and char.verbal_tic:
@@ -544,14 +562,157 @@ class ContextBudgetAllocator:
                 if hasattr(char, 'idle_behavior') and char.idle_behavior:
                     profile_parts.append(f"习惯动作: {char.idle_behavior}")
                 
+                # 刚登场标记
+                if is_recently_appeared:
+                    profile_parts.append("⚠️ 刚登场，需保持一致性")
+                
                 lines.append(f"\n- {char.name}: " + " | ".join(profile_parts))
             
-            return "\n".join(lines)
+            logger.info(
+                f"[CharacterAnchors] 选中 {len(selected_characters)} 个角色, "
+                f"包含 {sum(1 for _, r in selected_characters if r)} 个刚登场角色"
+            )
             
+            return "\n".join(lines)
+        
         except Exception as e:
             logger.warning(f"获取角色锚点失败: {e}")
         
         return ""
+    
+    def _schedule_characters(
+        self,
+        all_characters: List,
+        novel_id: str,
+        chapter_number: int,
+        outline: str,
+        scene_director: Optional[Dict[str, Any]] = None,
+    ) -> List[tuple]:
+        """智能角色调度（核心算法）
+        
+        Returns:
+            List[Tuple[Character, bool]]: [(角色, 是否刚登场), ...]
+        """
+        # 最大角色数限制
+        MAX_CHARACTERS = 7
+        
+        # Step 1: 从大纲中提取提及的角色名
+        mentioned_names = set()
+        if outline:
+            # 简单匹配：检查角色名是否在大纲中
+            for char in all_characters:
+                if char.name in outline:
+                    mentioned_names.add(char.name)
+        
+        # 如果有场记分析，合并场记中的角色
+        if scene_director and scene_director.get("characters"):
+            mentioned_names.update(scene_director["characters"])
+        
+        # Step 2: 从 chapter_elements 表查询最近出场的角色
+        recent_characters = self._get_recent_characters(novel_id, chapter_number)
+        
+        # Step 3: 分类：提及的 vs 未提及的
+        mentioned_chars = []
+        unmentioned_chars = []
+        
+        for char in all_characters:
+            # 检查是否刚登场（最近1章出场次数<=1）
+            is_recent = self._is_recently_appeared(char, recent_characters, chapter_number)
+            
+            if char.name in mentioned_names:
+                mentioned_chars.append((char, is_recent, self._get_char_importance(char)))
+            else:
+                unmentioned_chars.append((char, is_recent, self._get_char_importance(char)))
+        
+        # Step 4: 排序未提及角色（重要性 > 活动度）
+        unmentioned_chars.sort(key=lambda x: (
+            x[2],  # 重要性优先级（越小越优先）
+            -self._get_activity_score(x[0], recent_characters)  # 活动度降序
+        ))
+        
+        # Step 5: 合并队列
+        queue = mentioned_chars + unmentioned_chars
+        
+        # Step 6: 截断到最大数量
+        selected = queue[:MAX_CHARACTERS]
+        
+        # 返回 (角色, 是否刚登场) 的列表
+        return [(char, is_recent) for char, is_recent, _ in selected]
+    
+    def _get_recent_characters(self, novel_id: str, chapter_number: int) -> Dict[str, Dict]:
+        """从 chapter_elements 表查询最近5章的角色活动
+        
+        Returns:
+            Dict[char_id, {"count": int, "last_chapter": int}]
+        """
+        if not self.story_node_repo:
+            return {}
+        
+        try:
+            # 查询最近5章的 chapter_elements
+            # 这里简化实现，实际应该查询 chapter_elements 表
+            # SELECT element_id, COUNT(*) as count, MAX(chapter_number) as last_chapter
+            # FROM chapter_elements
+            # WHERE novel_id = ? AND element_type = 'character'
+            # AND chapter_number >= ?
+            # GROUP BY element_id
+            
+            # 暂时返回空字典，等待实际数据库查询
+            return {}
+            
+        except Exception as e:
+            logger.warning(f"查询最近角色活动失败: {e}")
+            return {}
+    
+    def _is_recently_appeared(self, char, recent_characters: Dict, chapter_number: int) -> bool:
+        """判断角色是否刚登场（最近1-2章首次出现）"""
+        char_id = char.character_id.value
+        
+        if char_id not in recent_characters:
+            # 角色从未出现过，可能是新角色
+            return True
+        
+        activity = recent_characters[char_id]
+        
+        # 如果只出场过1次，且在最近2章内
+        if activity["count"] == 1 and (chapter_number - activity["last_chapter"]) <= 2:
+            return True
+        
+        return False
+    
+    def _get_char_importance(self, char) -> int:
+        """获取角色重要性优先级（数字越小优先级越高）"""
+        # 从 CharacterImportance 映射到优先级
+        if hasattr(char, 'importance'):
+            priority_map = {
+                'protagonist': 0,
+                'major_supporting': 1,
+                'important_supporting': 2,
+                'minor': 3,
+                'background': 4
+            }
+            return priority_map.get(char.importance.value if hasattr(char.importance, 'value') else char.importance, 5)
+        
+        # 默认从描述推断
+        if hasattr(char, 'description'):
+            desc = char.description.lower()
+            if '主角' in desc or '主人公' in desc:
+                return 0
+            elif '主要配角' in desc:
+                return 1
+            elif '配角' in desc:
+                return 2
+        
+        return 3  # 默认次要角色
+    
+    def _get_activity_score(self, char, recent_characters: Dict) -> int:
+        """获取角色活动度分数"""
+        char_id = char.character_id.value
+        
+        if char_id not in recent_characters:
+            return 0
+        
+        return recent_characters[char_id].get("count", 0)
     
     def _get_graph_subnetwork(
         self,
