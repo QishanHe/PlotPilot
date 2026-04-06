@@ -1,4 +1,4 @@
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { workflowApi } from '../api/workflow'
@@ -173,11 +173,6 @@ export function useWorkbench(options: UseWorkbenchOptions) {
     // This method provides a consistent interface for future use
     // Current architecture uses delegation pattern
   }
-
-  // Cleanup on unmount
-  onUnmounted(() => {
-    stopPolling()
-  })
 
   return {
     // State
