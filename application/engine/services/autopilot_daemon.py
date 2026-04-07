@@ -197,8 +197,19 @@ class AutopilotDaemon:
                 logger.info(f"[{novel.novel_id}] 🔍 开始审计")
                 await self._handle_auditing(novel)
             elif novel.current_stage == NovelStage.PAUSED_FOR_REVIEW:
-                logger.debug(f"[{novel.novel_id}] ⏸️  等待人工审阅")
-                return  # 人工干预点：不处理，等前端确认
+                # 全自动模式：跳过审阅，直接进入下一阶段
+                if getattr(novel, 'auto_approve_mode', False):
+                    logger.info(f"[{novel.novel_id}] 🚀 全自动模式：跳过人工审阅")
+                    # 根据当前状态自动进入下一阶段
+                    # 宏观规划完成后 -> 幕级规划
+                    # 幕级规划完成后 -> 写作
+                    # 写作完成后 -> 审计
+                    novel.current_stage = NovelStage.ACT_PLANNING
+                    self._save_novel_state(novel)
+                    return
+                else:
+                    logger.debug(f"[{novel.novel_id}] ⏸️  等待人工审阅")
+                    return  # 人工干预点：不处理，等前端确认
 
             # ✅ 收尾写库（合并 DB 停止标志，避免把用户「停止」写回 RUNNING）
             self._merge_autopilot_status_from_db(novel)
@@ -263,9 +274,15 @@ class AutopilotDaemon:
             await self._create_minimal_structure(novel)
 
         # ⏸ 幕级大纲已就绪，进入人工审阅点（先落库再记日志，防止未保存导致下轮仍跑宏观规划）
-        novel.current_stage = NovelStage.PAUSED_FOR_REVIEW
-        self._flush_novel(novel)
-        logger.info(f"[{novel.novel_id}] 宏观规划完成，进入审阅等待")
+        # 全自动模式：跳过审阅，直接进入幕级规划
+        if getattr(novel, 'auto_approve_mode', False):
+            novel.current_stage = NovelStage.ACT_PLANNING
+            self._flush_novel(novel)
+            logger.info(f"[{novel.novel_id}] 🚀 全自动模式：宏观规划完成，直接进入幕级规划")
+        else:
+            novel.current_stage = NovelStage.PAUSED_FOR_REVIEW
+            self._flush_novel(novel)
+            logger.info(f"[{novel.novel_id}] 宏观规划完成，进入审阅等待")
 
     async def _confirm_macro_structure(self, novel: Novel, structure: list):
         """落库宏观结构；安全合并失败时回退为一次性写入（新书通常为无冲突）。"""
@@ -457,10 +474,16 @@ class AutopilotDaemon:
             return
 
         # 仅在本轮「新落库」幕级章节规划时暂停审阅；用户确认后同幕已有节点则直接写作，避免反复弹审批
+        # 全自动模式：跳过审阅，直接进入写作
         if just_created_chapter_plan:
-            novel.current_stage = NovelStage.PAUSED_FOR_REVIEW
-            self._flush_novel(novel)
-            logger.info(f"[{novel.novel_id}] 第 {target_act_number} 幕规划完成，进入审阅等待")
+            if getattr(novel, 'auto_approve_mode', False):
+                novel.current_stage = NovelStage.WRITING
+                self._flush_novel(novel)
+                logger.info(f"[{novel.novel_id}] 🚀 全自动模式：第 {target_act_number} 幕规划完成，直接进入写作")
+            else:
+                novel.current_stage = NovelStage.PAUSED_FOR_REVIEW
+                self._flush_novel(novel)
+                logger.info(f"[{novel.novel_id}] 第 {target_act_number} 幕规划完成，进入审阅等待")
         else:
             novel.current_stage = NovelStage.WRITING
             self._flush_novel(novel)

@@ -209,23 +209,23 @@ class AutoBibleGenerator:
             existing_worldbuilding = self._load_worldbuilding(novel_id)
             existing_characters = self._load_characters(novel_id)
             bible_data = await self._generate_locations(premise, target_chapters, existing_worldbuilding, existing_characters)
-        # 保存地点
-        location_ids = []
-        used_ids = set()  # 用于跟踪已使用的ID，防止重复
-        for idx, loc_data in enumerate(bible_data.get("locations", [])):
-            raw_id = loc_data.get("id")
-            location_id = (
-                str(raw_id).strip()
-                if isinstance(raw_id, str) and str(raw_id).strip()
-                else f"{novel_id}-loc-{idx+1}"
-            )
-            
-            # 检查并处理重复ID
-            if location_id in used_ids:
-                logger.info(f"Location ID {location_id} already exists, generating new ID")
-                location_id = f"{novel_id}-loc-{idx+1}-{len(used_ids)}"
-            
-            used_ids.add(location_id)
+            # 保存地点
+            location_ids = []
+            used_ids = set()  # 用于跟踪已使用的ID，防止重复
+            for idx, loc_data in enumerate(bible_data.get("locations", [])):
+                raw_id = loc_data.get("id")
+                location_id = (
+                    str(raw_id).strip()
+                    if isinstance(raw_id, str) and str(raw_id).strip()
+                    else f"{novel_id}-loc-{idx+1}"
+                )
+                
+                # 检查并处理重复ID
+                if location_id in used_ids:
+                    logger.info(f"Location ID {location_id} already exists, generating new ID")
+                    location_id = f"{novel_id}-loc-{idx+1}-{len(used_ids)}"
+                
+                used_ids.add(location_id)
                 p_raw = loc_data.get("parent_id")
                 parent_id = (
                     str(p_raw).strip()
